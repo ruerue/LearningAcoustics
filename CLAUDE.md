@@ -44,7 +44,7 @@ src/                 # Execution scripts (iOS ready)
 ### Pythonista Integration
 
 Scripts must be compatible with Pythonista's environment:
-- Use `objc` for iOS API access (AVFoundation, etc.)
+- Use `objc_util` (not `objc`) for iOS API access - `objc_util.load_framework('FrameworkName')`
 - Assume `sys.path` includes the parent directory for importing tools/
 - Path handling: Use `os.path.expanduser('~/Documents')` for file storage
 - All imports should handle Pythonista's limited stdlib gracefully
@@ -54,6 +54,21 @@ Example execution:
 # From Pythonista or terminal
 python3 src/20260430_001_test_recording.py
 ```
+
+### Pythonista-Specific Fixes
+
+**iOS API Access:**
+- **Error**: `ModuleNotFoundError: No module named 'objc'`
+- **Solution**: Use `objc_util` instead, which is Pythonista's native wrapper
+  ```python
+  import objc_util
+  Framework = objc_util.load_framework('FrameworkName')
+  ```
+
+**Path imports in src/ scripts:**
+- Scripts in src/ need to import from tools/ folder
+- Use: `sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))`
+- This adds the parent directory to Python path
 
 ### Working Copy Workflow
 
