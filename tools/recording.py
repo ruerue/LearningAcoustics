@@ -5,12 +5,7 @@ Provides audio recording functionality using AVAudioRecorder
 
 import objc_util
 import os
-from datetime import datetime
-from pathlib import Path
-
-# Import iOS frameworks (Pythonista)
-AVFoundation = objc_util.load_framework('AVFoundation')
-Foundation = objc_util.load_framework('Foundation')
+import time
 
 
 def record_audio(filename, duration=5, sample_rate=44100):
@@ -31,42 +26,53 @@ def record_audio(filename, duration=5, sample_rate=44100):
         output_path = os.path.join(docs_dir, filename)
         os.makedirs(docs_dir, exist_ok=True)
 
-        # Create NSURL for the output file
-        file_url = Foundation.NSURL.fileURLWithPath_(output_path)
+        # Load frameworks using objc_util
+        AVFoundation = objc_util.load_framework('AVFoundation')
+        Foundation = objc_util.load_framework('Foundation')
 
-        # Create audio settings
+        # Create NSURL for the output file using alloc/init pattern
+        file_url = objc_util.ObjCClass('NSURL').fileURLWithPath_(output_path)
+
+        # Create audio settings dictionary
         settings = {
-            AVFoundation.AVFormatIDKey: 1633772320,  # kAudioFormatLinearPCM
-            AVFoundation.AVSampleRateKey: sample_rate,
-            AVFoundation.AVNumberOfChannelsKey: 1,
-            AVFoundation.AVLinearPCMBitDepthKey: 16,
+            'AVFormatIDKey': 1633772320,  # kAudioFormatLinearPCM
+            'AVSampleRateKey': sample_rate,
+            'AVNumberOfChannelsKey': 1,
+            'AVLinearPCMBitDepthKey': 16,
         }
-        settings_dict = Foundation.NSDictionary.dictionaryWithDictionary_(settings)
 
-        # Create audio session
-        session = AVFoundation.AVAudioSession.sharedInstance()
-        session.setCategory_mode_options_error_(
-            AVFoundation.AVAudioSessionCategoryRecord,
-            AVFoundation.AVAudioSessionModeDefault,
-            0,
-            None
-        )
-        session.setActive_withOptions_error_(True, 1, None)
+        # Create recorder with settings
+        error = objc_util.c_void_p()
+        NSMutableDictionary = objc_util.ObjCClass('NSMutableDictionary')
+        settings_dict = NSMutableDictionary.dictionaryWithDictionary_(settings)
 
-        # Create recorder
-        recorder = AVFoundation.AVAudioRecorder.alloc().initWithURL_settings_error_(
-            file_url, settings_dict, None
+        AVAudioRecorder = objc_util.ObjCClass('AVAudioRecorder')
+        recorder = AVAudioRecorder.alloc().initWithURL_settings_error_(
+            file_url, settings_dict, error
         )
 
         if not recorder:
             raise Exception("Failed to initialize audio recorder")
 
+        # Setup audio session
+        AVAudioSession = objc_util.ObjCClass('AVAudioSession')
+        session = AVAudioSession.sharedInstance()
+
+        # Set category for recording
+        session.setCategory_mode_options_error_(
+            'AVAudioSessionCategoryRecord',
+            'AVAudioSessionModeDefault',
+            0,
+            None
+        )
+        session.setActive_withOptions_error_(True, 1, None)
+
         # Record
         recorder.record()
         print(f"🎙️ Recording started: {filename}")
+        print(f"📍 Duration: {duration} seconds")
 
         # Wait for specified duration
-        import time
         time.sleep(duration)
 
         # Stop recording
@@ -78,6 +84,8 @@ def record_audio(filename, duration=5, sample_rate=44100):
 
     except Exception as e:
         print(f"❌ Recording error: {e}")
+        import traceback
+        traceback.print_exc()
         raise
 
 

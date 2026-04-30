@@ -65,6 +65,17 @@ python3 src/20260430_001_test_recording.py
   Framework = objc_util.load_framework('FrameworkName')
   ```
 
+**ObjC Classes in Pythonista:**
+- **Error**: `'bool' object has no attribute 'NSURL'` or similar
+- **Solution**: Use `objc_util.ObjCClass()` to access Objective-C classes directly
+  ```python
+  import objc_util
+  NSURL = objc_util.ObjCClass('NSURL')
+  url = NSURL.fileURLWithPath_(filepath)
+  ```
+- Load frameworks at function level, not module level
+- Use string keys for ObjC method names and dictionary access
+
 **Path imports in src/ scripts:**
 - Scripts in src/ need to import from tools/ folder
 - Use: `sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))`
