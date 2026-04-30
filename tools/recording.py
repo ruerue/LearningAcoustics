@@ -1,21 +1,20 @@
 """
 Recording utilities for Pythonista
-Provides audio recording functionality using AVAudioRecorder
+Provides audio recording functionality using Pythonista's sound module
 """
 
-import objc_util
+import sound
 import os
-import time
 
 
-def record_audio(filename, duration=5, sample_rate=44100):
+def record_audio(filename, duration=5, channels=1):
     """
-    Record audio using Pythonista's audio capabilities
+    Record audio using Pythonista's built-in sound module
 
     Args:
         filename: Output file name (will be saved to Documents)
         duration: Recording duration in seconds
-        sample_rate: Sample rate in Hz
+        channels: Number of audio channels (1=mono, 2=stereo)
 
     Returns:
         Path to the recorded file
@@ -26,58 +25,11 @@ def record_audio(filename, duration=5, sample_rate=44100):
         output_path = os.path.join(docs_dir, filename)
         os.makedirs(docs_dir, exist_ok=True)
 
-        # Load frameworks using objc_util
-        AVFoundation = objc_util.load_framework('AVFoundation')
-        Foundation = objc_util.load_framework('Foundation')
-
-        # Create NSURL for the output file using alloc/init pattern
-        file_url = objc_util.ObjCClass('NSURL').fileURLWithPath_(output_path)
-
-        # Create audio settings dictionary
-        settings = {
-            'AVFormatIDKey': 1633772320,  # kAudioFormatLinearPCM
-            'AVSampleRateKey': sample_rate,
-            'AVNumberOfChannelsKey': 1,
-            'AVLinearPCMBitDepthKey': 16,
-        }
-
-        # Create recorder with settings
-        error = objc_util.c_void_p()
-        NSMutableDictionary = objc_util.ObjCClass('NSMutableDictionary')
-        settings_dict = NSMutableDictionary.dictionaryWithDictionary_(settings)
-
-        AVAudioRecorder = objc_util.ObjCClass('AVAudioRecorder')
-        recorder = AVAudioRecorder.alloc().initWithURL_settings_error_(
-            file_url, settings_dict, error
-        )
-
-        if not recorder:
-            raise Exception("Failed to initialize audio recorder")
-
-        # Setup audio session
-        AVAudioSession = objc_util.ObjCClass('AVAudioSession')
-        session = AVAudioSession.sharedInstance()
-
-        # Set category for recording
-        session.setCategory_mode_options_error_(
-            'AVAudioSessionCategoryRecord',
-            'AVAudioSessionModeDefault',
-            0,
-            None
-        )
-        session.setActive_withOptions_error_(True, 1, None)
-
-        # Record
-        recorder.record()
         print(f"🎙️ Recording started: {filename}")
-        print(f"📍 Duration: {duration} seconds")
+        print(f"📍 Duration: {duration} seconds, Channels: {channels}")
 
-        # Wait for specified duration
-        time.sleep(duration)
-
-        # Stop recording
-        recorder.stop()
-        session.setActive_withOptions_error_(False, 1, None)
+        # Record audio using Pythonista's sound module
+        sound.record_to_file(output_path, duration, channels)
 
         print(f"✓ Recording saved to: {output_path}")
         return output_path
@@ -100,4 +52,4 @@ def record_audio_simple(filename, duration=5):
     Returns:
         Path to the recorded file
     """
-    return record_audio(filename, duration=duration, sample_rate=44100)
+    return record_audio(filename, duration=duration, channels=1)
