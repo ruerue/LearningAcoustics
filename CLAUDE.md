@@ -119,9 +119,23 @@ git log --oneline -5
 3. Test by running directly in Pythonista via Working Copy
 4. Verify output files appear in Documents folder
 
+## Pythonista Audio Recording
+
+The project uses Pythonista's built-in `sound` module for audio recording. This approach is more reliable than direct AVFoundation calls in Pythonista's environment:
+
+```python
+import sound
+sound.record_to_file(filepath, duration, channels)
+```
+
+Benefits:
+- Simpler and more reliable than low-level ObjC API calls
+- Handles audio session setup automatically
+- Better compatibility across Pythonista versions
+
 ## Notes for Future Work
 
 - Pythonista has limited stdlib; test any new packages compatibility
 - iOS file permissions require specific handling for ~/Documents access
-- AVFoundation requires proper audio session setup (see `tools/recording.py` example)
+- Use `sound` module instead of direct framework calls for audio operations
 - Scripts should print progress/status for user feedback in Pythonista console
