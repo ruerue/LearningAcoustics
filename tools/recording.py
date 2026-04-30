@@ -3,15 +3,14 @@ Recording utilities for Pythonista
 Provides audio recording functionality using AVAudioRecorder
 """
 
-import objc
-from objc import ObjCInstance
+import objc_util
 import os
 from datetime import datetime
 from pathlib import Path
 
-# Import iOS frameworks
-AVFoundation = objc.getFrameworkWithName('AVFoundation')
-Foundation = objc.getFrameworkWithName('Foundation')
+# Import iOS frameworks (Pythonista)
+AVFoundation = objc_util.load_framework('AVFoundation')
+Foundation = objc_util.load_framework('Foundation')
 
 
 def record_audio(filename, duration=5, sample_rate=44100):
