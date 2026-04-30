@@ -121,16 +121,22 @@ git log --oneline -5
 
 ## Pythonista Audio Recording
 
-The project uses Pythonista's built-in `sound` module for audio recording. This approach is more reliable than direct AVFoundation calls in Pythonista's environment:
+The project uses Pythonista's built-in `sound.Recorder` class for audio recording. This approach is more reliable than direct AVFoundation calls in Pythonista's environment:
 
 ```python
 import sound
-sound.record_to_file(filepath, duration, channels)
+recorder = sound.Recorder(channels=1)
+recorder.start()
+# ... record for duration ...
+recorder.stop()
+audio = recorder.audio
+audio.export(filepath, 'wav')
 ```
 
 Benefits:
-- Simpler and more reliable than low-level ObjC API calls
+- Built-in Pythonista class with consistent API
 - Handles audio session setup automatically
+- Direct access to audio data
 - Better compatibility across Pythonista versions
 
 ## Notes for Future Work
