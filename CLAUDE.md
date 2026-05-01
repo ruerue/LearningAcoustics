@@ -89,6 +89,19 @@ python3 src/20260430_001_test_recording.py
 4. Run and verify functionality
 5. If working, commit with clear messages
 
+## Development Workflow with Claude Code
+
+### Commits and Pushes
+- **Only commit and push when explicitly instructed**
+- Claude Code will change files and report modifications at the end of each response
+- You verify changes work before requesting commit/push
+- This speeds up iteration by avoiding unnecessary commits
+
+### File Changes Reporting
+- Claude Code will always display modified files at the end
+- Use copy-paste from terminal to manually commit when ready
+- Format: provide exact `git add` and `git commit` commands needed
+
 ## Common Commands
 
 ```bash
