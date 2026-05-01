@@ -89,6 +89,19 @@ python3 src/20260430_001_test_recording.py
 4. Run and verify functionality
 5. If working, commit with clear messages
 
+## Development Workflow with Claude Code
+
+### Commits and Pushes
+- **Only commit and push when explicitly instructed**
+- Claude Code will change files and report modifications at the end of each response
+- You verify changes work before requesting commit/push
+- This speeds up iteration by avoiding unnecessary commits
+
+### File Changes Reporting
+- Claude Code will always display modified files at the end
+- Use copy-paste from terminal to manually commit when ready
+- Format: provide exact `git add` and `git commit` commands needed
+
 ## Common Commands
 
 ```bash
@@ -125,18 +138,17 @@ The project uses Pythonista's built-in `sound.Recorder` class for audio recordin
 
 ```python
 import sound
-recorder = sound.Recorder(channels=1)
-recorder.start()
-# ... record for duration ...
+recorder = sound.Recorder(filepath)
+recorder.record()
+# ... wait for duration ...
 recorder.stop()
-audio = recorder.audio
-audio.export(filepath, 'wav')
+# File is automatically saved to filepath
 ```
 
 Benefits:
 - Built-in Pythonista class with consistent API
 - Handles audio session setup automatically
-- Direct access to audio data
+- Automatically saves to specified file path
 - Better compatibility across Pythonista versions
 
 ## Notes for Future Work
