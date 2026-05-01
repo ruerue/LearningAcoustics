@@ -5,16 +5,16 @@ Provides audio recording functionality using Pythonista's Recorder class
 
 import sound
 import os
+import time
 
 
-def record_audio(filename, duration=5, channels=1):
+def record_audio(filename, duration=5):
     """
     Record audio using Pythonista's sound.Recorder class
 
     Args:
         filename: Output file name (will be saved to Documents)
         duration: Recording duration in seconds
-        channels: Number of audio channels (1=mono, 2=stereo)
 
     Returns:
         Path to the recorded file
@@ -26,22 +26,17 @@ def record_audio(filename, duration=5, channels=1):
         os.makedirs(docs_dir, exist_ok=True)
 
         print(f"🎙️ Recording started: {filename}")
-        print(f"📍 Duration: {duration} seconds, Channels: {channels}")
+        print(f"📍 Duration: {duration} seconds")
 
-        # Create and start recorder
-        recorder = sound.Recorder(channels=channels)
-        recorder.start()
+        # Create and start recorder (path is required argument)
+        recorder = sound.Recorder(output_path)
+        recorder.record()
 
         # Wait for specified duration
-        import time
         time.sleep(duration)
 
-        # Stop recording and get audio data
+        # Stop recording (auto-saves to the specified path)
         recorder.stop()
-        audio = recorder.audio
-
-        # Save to file
-        audio.export(output_path, 'wav')
 
         print(f"✓ Recording saved to: {output_path}")
         return output_path
@@ -64,4 +59,4 @@ def record_audio_simple(filename, duration=5):
     Returns:
         Path to the recorded file
     """
-    return record_audio(filename, duration=duration, channels=1)
+    return record_audio(filename, duration=duration)

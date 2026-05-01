@@ -138,18 +138,17 @@ The project uses Pythonista's built-in `sound.Recorder` class for audio recordin
 
 ```python
 import sound
-recorder = sound.Recorder(channels=1)
-recorder.start()
-# ... record for duration ...
+recorder = sound.Recorder(filepath)
+recorder.record()
+# ... wait for duration ...
 recorder.stop()
-audio = recorder.audio
-audio.export(filepath, 'wav')
+# File is automatically saved to filepath
 ```
 
 Benefits:
 - Built-in Pythonista class with consistent API
 - Handles audio session setup automatically
-- Direct access to audio data
+- Automatically saves to specified file path
 - Better compatibility across Pythonista versions
 
 ## Notes for Future Work
