@@ -157,10 +157,10 @@ Benefits:
 
 All WAV recordings are saved to:
 ```
-~/Documents/wavfile/
+<project_root>/wavfile/
 ```
 
-This folder is created automatically at runtime if it does not exist.
+This is the `wavfile/` folder at the same level as `src/` and `tools/`. It is created automatically at runtime if it does not exist.
 
 ### File Naming Format
 
