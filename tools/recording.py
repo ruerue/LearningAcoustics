@@ -39,8 +39,9 @@ def record_with_label(duration=5):
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     filename = f'{timestamp}_{label}.wav'
 
-    docs_dir = os.path.expanduser('~/Documents')
-    wavfile_dir = os.path.join(docs_dir, 'wavfile')
+    # Save to wavfile/ in the project root (same level as src/ and tools/)
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    wavfile_dir = os.path.join(project_root, 'wavfile')
     os.makedirs(wavfile_dir, exist_ok=True)
 
     output_path = os.path.join(wavfile_dir, filename)
