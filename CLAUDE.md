@@ -151,6 +151,38 @@ Benefits:
 - Automatically saves to specified file path
 - Better compatibility across Pythonista versions
 
+## WAV File Saving Convention
+
+### Save Location
+
+All WAV recordings are saved to:
+```
+~/Documents/wavfile/
+```
+
+This folder is created automatically at runtime if it does not exist.
+
+### File Naming Format
+
+```
+YYYYMMDD_HHMMSS_<label>.wav
+```
+
+- `YYYYMMDD` — Recording date (e.g. `20260503`)
+- `HHMMSS`   — Recording start time (e.g. `143022`)
+- `<label>`  — User-supplied label entered in a popup dialog each time
+
+Example: `20260503_143022_cat.wav`
+
+### Label Input (Popup Dialog)
+
+Use `tools.record_with_label()` (or run `src/20260503_001_record_with_label.py`) to trigger a Pythonista popup (`dialogs.input_alert`) that asks for a label before each recording. The label becomes the `XX` part of the filename. Spaces are replaced with underscores; empty input defaults to `noname`.
+
+```python
+from tools import record_with_label
+path = record_with_label(duration=5)
+```
+
 ## Notes for Future Work
 
 - Pythonista has limited stdlib; test any new packages compatibility
