@@ -1,0 +1,7 @@
+
+
+=== 2026-05-05 - 07:27
+  File "/private/var/mobile/Containers/Shared/AppGroup/C265A458-CA84-4328-BB18-8F5D3DBA6DCE/File Provider Storage/Repositories/LearningAcoustics/test_pythonista.py", line 88
+    from <scipy.io> import wavfile as sciwav
+         ^
+SyntaxError: invalid syntax
