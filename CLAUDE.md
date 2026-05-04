@@ -21,15 +21,19 @@ The project follows a clear separation of concerns:
 ```
 tools/               # Reusable modules and functions
 ├── recording.py     # Audio capture functionality (mono & stereo)
+├── wav_dataset.py   # WAV <-> NPZ 変換 / ロード / 校正ヘルパー
 └── __init__.py
 
 src/                 # Execution scripts (iOS ready)
 ├── 20260430_001_test_recording.py
 ├── 20260503_001_record_with_label.py
 ├── 20260504_001_record_stereo.py
+├── 20260504_002_inspect_wav_environment.py   # Pythonista 環境調査
+├── 20260504_003_convert_wavs_to_npz.py       # wavfile/ -> dataset/ 変換
 └── __init__.py
 
 wavfile/             # Recorded WAV files (auto-created at runtime)
+dataset/             # WAV から変換した .npz (解析用、auto-created)
 ```
 
 ### Key Principles
@@ -250,6 +254,140 @@ path = record_stereo_with_label(duration=5)
 
 **条件**: iOS対応にはUSB Audio Class-Compliant（クラスコンプライアント）であることが必須。
 
+## Pythonista 環境調査結果 (2026-05-04 実機確認)
+
+`src/20260504_002_inspect_wav_environment.py` を iPhone (iOS 26.4.2 / iPhone12,8) 上で実行した結果。
+
+### ランタイム
+- Python 3.10.4 (CPython)
+- cwd は Working Copy の File Provider Storage 内 (LearningAcoustics 直下)
+
+### 標準ライブラリ
+| モジュール | 可否 | メモ |
+|---|---|---|
+| `wave`, `struct`, `array` | OK | WAV 読み書きの基盤 |
+| `pickle`, `json`, `csv`, `sqlite3`, `base64` | OK | |
+| `gzip`, `bz2` | OK | 圧縮利用可 |
+| `lzma` | **NG** | `_lzma` モジュールが無い (Pythonista のビルド都合) |
+
+### サードパーティ
+| ライブラリ | 可否 | バージョン |
+|---|---|---|
+| `numpy` | OK | 1.22.3 |
+| `pandas` | OK | 1.4.4 |
+| `matplotlib` | OK | 3.3.3+0.g5a4f1b675d.dirty |
+| `scipy` (含 `scipy.io.wavfile` / `scipy.signal`) | **NG** | 未導入 |
+| `soundfile` | **NG** | libsndfile が無く iOS では事実上不可 |
+| `h5py` | **NG** | 未導入 |
+
+### 結論: 解析データの永続化形式
+- **採用**: `np.savez_compressed` による `.npz` 保存
+  - 理由: numpy のみで完結 / 圧縮が効く (実測 60–82%) / 文字列・スカラー・配列を辞書状にまとめられる / scipy/h5py 不要
+- 補助: 必要なら `pickle.gz` も使えるが ndarray 中心なら `.npz` が直行
+- 非採用: scipy.io.wavfile / soundfile / h5py (未導入のため)
+
+### WAV 読み込みの定石 (Pythonista 上)
+```python
+import wave, numpy as np
+w = wave.open(path, 'rb')
+nch, sw, fr, nf = w.getnchannels(), w.getsampwidth(), w.getframerate(), w.getnframes()
+raw = w.readframes(nf); w.close()
+arr = np.frombuffer(raw, dtype=np.int16)
+if nch > 1:
+    arr = arr.reshape(-1, nch)
+```
+
+### Pythonista でのコピペ実行に関する注意点
+- **シェバング (`#!/...`) は1行目で SyntaxError** になることがある → ベタ打ち版では除く
+- **「Globals == Locals」モード**では関数本体内の空行が解釈区切りになりうる → 関数内に空行を置かない
+- ドット付きモジュール名 (例: `from scipy.io import ...`) はレンダラー経由で自動リンク化されて `<scipy.io>` に化けるケースが確認されたため、コピペ用コードでは `importlib.import_module('scipy.io.wavfile')` を使う
+
+## NPZ Dataset Schema (v1.0)
+
+`tools/wav_dataset.py` の `convert_wav_to_npz()` が出力する `.npz` のキー一覧。
+将来の周波数表示・dB SPL 表示・校正運用を見越して拡張余地を持たせている。
+
+| キー | 型 | 役割 |
+|---|---|---|
+| `samples` | ndarray int16 (N,) or (N, ch) | 生サンプル本体 |
+| `sample_dtype` | str | `'int16'` 等 |
+| `samplerate` | int32 | Hz |
+| `channels` | int32 | チャンネル数 |
+| `bit_depth` | int32 | 16 等 |
+| `n_frames` | int64 | サンプル数 |
+| `duration_sec` | float64 | 再生時間 |
+| `full_scale` | float64 | int → float 正規化の分母 (int16 なら 32768.0) |
+| `source` | str | 元 WAV ファイル名 |
+| `recorded_at` | str | `'YYYYMMDD_HHMMSS'` (ファイル名から自動抽出) |
+| `label` | str | ファイル名末尾のラベル |
+| `device` | str | `'iPhone built-in mic'` 等 |
+| `mic_orientation` | str | `'Front'` / `'Back'` / `''` |
+| `polar_pattern` | str | `'Stereo'` / `'Omni'` / `''` |
+| `preamp_gain_db` | float64 | 外部ゲイン (dB) |
+| `cal_db_spl_at_full_scale` | float64 | フルスケール = 何 dB SPL か (NaN=未校正) |
+| `cal_ref_freq_hz` | float64 | 校正基準周波数 (NaN=未校正) |
+| `cal_method` | str | 校正方法のメモ |
+| `cal_date` | str | 校正実施日 |
+| `preprocess` | str | 前処理メモ |
+| `notes` | str | 自由記述 |
+| `schema_version` | str | `'1.0'` |
+
+### dB SPL の換算式 (校正済みの場合)
+```
+SPL_dB = 20 * log10(rms_float) + cal_db_spl_at_full_scale - preamp_gain_db
+```
+- `rms_float` は `samples / full_scale` の RMS (-1〜1 正規化)
+- 校正は `tools.update_calibration(npz_path, cal_db_spl_at_full_scale=..., ...)` で後追い記入できる
+
+### 使い方
+```python
+from tools import convert_dir, load_npz, update_calibration
+
+# 一括変換
+convert_dir('wavfile', 'dataset')
+
+# 読み込み
+rec = load_npz('dataset/20260504_105248_test.npz')
+rec.samples            # ndarray (N, ch) int16
+rec.to_float()         # ndarray (N, ch) float32, -1.0~1.0
+rec.channel(0)         # 左ch のみ
+rec.time_axis()        # 秒軸 (N,)
+rec.rms(); rec.dbfs()  # RMS / dBFS
+rec.db_spl()           # 校正済みなら dB SPL、未校正なら NaN
+
+# 後から校正情報を埋める
+update_calibration(
+    'dataset/20260504_105248_test.npz',
+    cal_db_spl_at_full_scale=120.0,  # 例: 1Pa = 94dB SPL を基準に算出した値
+    cal_ref_freq_hz=1000.0,
+    cal_method='B&K 4231 ピストンホン (94 dB SPL @ 1 kHz)',
+)
+```
+
+## 今後の予定 (Roadmap)
+
+### B案 (`tools/wav_dataset.py` の機能拡張)
+保存スキーマは v1.0 で固まったので、以下は読み込み側に追加していく方針:
+
+1. **周波数解析ヘルパー** (numpy のみで実装。scipy 不可のため `np.fft` を使用)
+   - `WavRecord.spectrum(channel=0, n_fft=None, window='hann')` → (freq, magnitude_db)
+   - `WavRecord.spectrogram(channel=0, n_fft=2048, hop=512, window='hann')` → (freqs, times, S_db)
+   - 窓関数は `np.hanning` / `np.hamming` / `np.blackman` などを内製ディスパッチ
+2. **dB SPL 表示**
+   - `WavRecord.db_spl_series(channel=0, frame_ms=125)` → 時間連続 SPL
+   - 校正済みのみ動作、未校正なら明示的に `RuntimeError`
+3. **可視化 (matplotlib)**
+   - 別モジュール `tools/plotting.py` を作る案
+   - 波形 / スペクトル / スペクトログラム / dB SPL タイムライン
+4. **校正ワークフロー**
+   - ピストンホン (94 dB SPL @ 1 kHz 等) 録音から `cal_db_spl_at_full_scale` を自動算出するヘルパー
+   - `tools.calibrate_from_reference(npz_path, ref_db_spl=94.0, ref_freq_hz=1000.0)`
+
+### スキーマを増やす際のルール
+- 既存キーの**型・意味は変更しない**
+- 追加キーのみ許可、未設定時は NaN / 空文字
+- `schema_version` を上げる際は `tools/wav_dataset.py` の docstring を更新
+
 ## Notes for Future Work
 
 - Pythonista has limited stdlib; test any new packages compatibility
@@ -257,3 +395,4 @@ path = record_stereo_with_label(duration=5)
 - Stereo recording uses `AVAudioRecorder` via `objc_util`; mono uses `sound.Recorder`
 - Multi-channel (4ch+) requires external USB audio interface + `AVAudioEngine` implementation
 - Scripts should print progress/status for user feedback in Pythonista console
+- 解析用データは `dataset/*.npz` (numpy) で保持。scipy/soundfile/h5py は実機に無いので使わない
