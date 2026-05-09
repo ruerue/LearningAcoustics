@@ -34,6 +34,7 @@ v1.0 → v1.1 互換: audio_session_mode キーを追加。v1.0 で書かれた 
 load_npz() で読むと audio_session_mode='' (不明) として扱う。
 """
 
+import json
 import os
 import re
 import wave
@@ -44,6 +45,23 @@ import numpy as np
 
 
 SCHEMA_VERSION = '1.1'
+
+
+def _load_meta_sidecar(wav_path):
+    """<basename>.meta.json があれば読み込んで返す。無ければ {}。
+
+    record_mono_calibrated / record_stereo が録音時に書き出すサイドカー。
+    convert_wav_to_npz が引数省略時のデフォルト値補完に使う。
+    """
+    base, _ = os.path.splitext(wav_path)
+    meta_path = base + '.meta.json'
+    if not os.path.exists(meta_path):
+        return {}
+    try:
+        with open(meta_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
 
 
 def _window(name, n):
@@ -140,34 +158,71 @@ def _wav_to_array(path):
 
 def convert_wav_to_npz(
     wav_path,
-    out_path,
-    device='iPhone built-in mic',
-    mic_orientation='',
-    polar_pattern='',
-    audio_session_mode='',
-    preamp_gain_db=0.0,
-    cal_db_spl_at_full_scale=float('nan'),
-    cal_ref_freq_hz=float('nan'),
-    cal_method='',
-    cal_date='',
+    out_path=None,
+    device=None,
+    mic_orientation=None,
+    polar_pattern=None,
+    audio_session_mode=None,
+    preamp_gain_db=None,
+    cal_db_spl_at_full_scale=None,
+    cal_ref_freq_hz=None,
+    cal_method=None,
+    cal_date=None,
     preprocess='',
     notes='',
-    use_default_cal=False,
+    use_default_cal=True,
 ):
-    """単一の WAV を .npz に変換する。
+    """単一の WAV を .npz に変換する。最低限 wav_path を渡すだけで動く。
 
-    保存内容のスキーマはモジュールの docstring を参照。
-    校正関連フィールドは省略時 NaN/空文字で初期化される。
+    out_path:
+        None なら <project_root>/dataset/<wav_basename>.npz に書き出す。
 
-    audio_session_mode は SPL 校正値の信頼性に直結する。
-    'Measurement' (AGC off) で撮った録音だけが SPL 校正に意味がある。
-    record_mono_calibrated 経由なら 'Measurement' を渡すこと。
+    device / mic_orientation / polar_pattern / audio_session_mode /
+    preamp_gain_db / cal_*:
+        いずれも None で渡すと次の優先順位で解決する。
+          1. <wav_basename>.meta.json (録音時のサイドカー) があればそこから
+          2. 無ければデフォルト ('iPhone built-in mic' / '' / 0.0 / NaN)
+        明示的に値を渡せば最優先。
 
-    use_default_cal=True かつ cal_db_spl_at_full_scale が NaN の場合、
-    (device, mic_orientation, polar_pattern, audio_session_mode) を
-    キーとして tools.calibration_store から自動で校正値を引いてくる。
-    該当エントリが無ければ warning を出して未校正のまま保存する。
+    use_default_cal:
+        True (default) かつ cal_db_spl_at_full_scale が NaN のとき、
+        (device, mic_orientation, polar_pattern, audio_session_mode) を
+        キーに tools.calibration_store から自動取得する。
+        該当エントリが無ければ warning を出して未校正のまま保存。
+
+    audio_session_mode は SPL 校正値の信頼性に直結する。'Measurement'
+    (AGC off) で撮った録音だけが SPL 校正に意味がある。
     """
+    sidecar = _load_meta_sidecar(wav_path)
+
+    def _resolve(passed, key, default):
+        if passed is not None:
+            return passed
+        if key in sidecar:
+            return sidecar[key]
+        return default
+
+    device = _resolve(device, 'device', 'iPhone built-in mic')
+    mic_orientation = _resolve(mic_orientation, 'mic_orientation', '')
+    polar_pattern = _resolve(polar_pattern, 'polar_pattern', '')
+    audio_session_mode = _resolve(audio_session_mode, 'audio_session_mode', '')
+    preamp_gain_db = float(_resolve(preamp_gain_db, 'preamp_gain_db', 0.0))
+    cal_db_spl_at_full_scale = float(_resolve(
+        cal_db_spl_at_full_scale, 'cal_db_spl_at_full_scale', float('nan')))
+    cal_ref_freq_hz = float(_resolve(
+        cal_ref_freq_hz, 'cal_ref_freq_hz', float('nan')))
+    cal_method = str(_resolve(cal_method, 'cal_method', ''))
+    cal_date = str(_resolve(cal_date, 'cal_date', ''))
+
+    if out_path is None:
+        proj = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        ds_dir = os.path.join(proj, 'dataset')
+        os.makedirs(ds_dir, exist_ok=True)
+        out_path = os.path.join(
+            ds_dir,
+            os.path.splitext(os.path.basename(wav_path))[0] + '.npz',
+        )
+
     if use_default_cal and np.isnan(cal_db_spl_at_full_scale):
         from .calibration_store import load_default_cal
         entry = load_default_cal(

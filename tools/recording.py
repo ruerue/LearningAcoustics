@@ -3,10 +3,24 @@ Recording utilities for Pythonista
 Provides audio recording functionality using Pythonista's Recorder class
 """
 
+import json
 import sound
 import os
 import time
 from datetime import datetime
+
+
+def _write_meta_sidecar(wav_path, **meta):
+    """録音時のセッション情報を <basename>.meta.json として書き出す。
+
+    convert_wav_to_npz が後で読んで、ユーザが明示的に渡さなかった
+    audio_session_mode / mic_orientation / polar_pattern などを自動補完する。
+    """
+    base, _ = os.path.splitext(wav_path)
+    meta_path = base + '.meta.json'
+    with open(meta_path, 'w', encoding='utf-8') as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2, sort_keys=True)
+    return meta_path
 
 
 def record_with_label(duration=5):
@@ -213,6 +227,17 @@ def record_stereo(output_path, duration=5, orientation='Front'):
     recorder.stop()
 
     AVAudioSession.sharedInstance().setActive_error_(False, None)
+
+    _write_meta_sidecar(
+        output_path,
+        device='iPhone built-in mic',
+        mic_orientation=orientation,
+        polar_pattern='Stereo',
+        audio_session_mode='Default',
+        recording_api='record_stereo',
+        samplerate=48000,
+        channels=2,
+    )
     return output_path
 
 
@@ -329,7 +354,7 @@ def record_mono_calibrated(output_path, duration=5, orientation='', samplerate=4
     """
     import objc_util
 
-    _configure_measurement_session(orientation)
+    _, ds_orient = _configure_measurement_session(orientation)
 
     objc_util.load_framework('AVFoundation')
     AVAudioRecorder = objc_util.ObjCClass('AVAudioRecorder')
@@ -358,6 +383,18 @@ def record_mono_calibrated(output_path, duration=5, orientation='', samplerate=4
     recorder.stop()
 
     AVAudioSession.sharedInstance().setActive_error_(False, None)
+
+    actual_orientation = (ds_orient or '').strip() or orientation or 'Front'
+    _write_meta_sidecar(
+        output_path,
+        device='iPhone built-in mic',
+        mic_orientation=actual_orientation,
+        polar_pattern='Cardioid',
+        audio_session_mode='Measurement',
+        recording_api='record_mono_calibrated',
+        samplerate=int(samplerate),
+        channels=1,
+    )
     return output_path
 
 
