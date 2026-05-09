@@ -166,6 +166,22 @@ path = record_stereo_with_label(duration=5, orientation='Back')  # 背面マイ�
 
 **Verified on device**: iPhone内蔵マイクのStereoポーラーパターンで2chステレオ録音動作確認済み（2026-05-04）。
 
+### SPL 校正用 Mono 録音 — `record_mono_calibrated_with_label`
+
+`AVAudioSessionModeMeasurement` で AGC を無効化した mono 録音。SPL 校正値が物理的意味を持つのはこの API で撮ったファイルのみ。
+
+```python
+from tools import record_mono_calibrated_with_label
+path = record_mono_calibrated_with_label(duration=5)                   # システム既定 (通常 Bottom Omnidirectional)
+path = record_mono_calibrated_with_label(duration=5, orientation='Front')  # 内蔵マイクの前面データソース
+```
+
+**実機検証結果（2026-05-09, iOS 26.4.2 / iPhone12,8）**: Measurement モードと Stereo polar pattern は **両立不可**。Measurement に切り替えると `port.dataSources()` の supportedPolarPatterns から Stereo が外れ、`setPreferredInputNumberOfChannels(2)` も `False` で蹴られる。`session.inputGain settable=False` なので手動ゲイン固定もできず、Measurement モードが AGC を切る唯一の手段。
+
+→ 用途別に API を二段構え:
+- 楽しみ用ステレオ録音 → `record_stereo_with_label` (Default mode + Stereo polar)
+- SPL 校正録音 / 解析用 → `record_mono_calibrated_with_label` (Measurement mode + mono)
+
 #### AVAudioSession ステレオ設定の正しい順序
 
 ```python
@@ -302,7 +318,7 @@ if nch > 1:
 - **「Globals == Locals」モード**では関数本体内の空行が解釈区切りになりうる → 関数内に空行を置かない
 - ドット付きモジュール名 (例: `from scipy.io import ...`) はレンダラー経由で自動リンク化されて `<scipy.io>` に化けるケースが確認されたため、コピペ用コードでは `importlib.import_module('scipy.io.wavfile')` を使う
 
-## NPZ Dataset Schema (v1.0)
+## NPZ Dataset Schema (v1.1)
 
 `tools/wav_dataset.py` の `convert_wav_to_npz()` が出力する `.npz` のキー一覧。
 将来の周波数表示・dB SPL 表示・校正運用を見越して拡張余地を持たせている。
@@ -321,8 +337,9 @@ if nch > 1:
 | `recorded_at` | str | `'YYYYMMDD_HHMMSS'` (ファイル名から自動抽出) |
 | `label` | str | ファイル名末尾のラベル |
 | `device` | str | `'iPhone built-in mic'` 等 |
-| `mic_orientation` | str | `'Front'` / `'Back'` / `''` |
-| `polar_pattern` | str | `'Stereo'` / `'Omni'` / `''` |
+| `mic_orientation` | str | `'Front'` / `'Back'` / `'Bottom'` / `''` |
+| `polar_pattern` | str | `'Stereo'` / `'Cardioid'` / `'Omnidirectional'` / `''` |
+| `audio_session_mode` *(v1.1+)* | str | `'Measurement'` (AGC off, SPL校正可) / `'Default'` (AGC on, SPL校正不可) / `''` |
 | `preamp_gain_db` | float64 | 外部ゲイン (dB) |
 | `cal_db_spl_at_full_scale` | float64 | フルスケール = 何 dB SPL か (NaN=未校正) |
 | `cal_ref_freq_hz` | float64 | 校正基準周波数 (NaN=未校正) |
@@ -330,7 +347,21 @@ if nch > 1:
 | `cal_date` | str | 校正実施日 |
 | `preprocess` | str | 前処理メモ |
 | `notes` | str | 自由記述 |
-| `schema_version` | str | `'1.0'` |
+| `schema_version` | str | `'1.1'` |
+
+### v1.0 → v1.1 互換性
+
+- 追加キーのみ (`audio_session_mode`)。既存キーの型・意味は不変。
+- v1.0 で書かれた `.npz` を `load_npz()` で読むと `audio_session_mode=''` (不明) として扱う。
+- 既存 `.npz` に後追い記入したい場合は `update_calibration(path, audio_session_mode='Measurement' or 'Default')` で OK。
+
+### SPL 校正の信頼性ルール
+
+`WavRecord.is_calibration_trustworthy` は **「校正済 AND `audio_session_mode == 'Measurement'`」** のときのみ `True`。
+
+- iPhone 内蔵マイクは `inputGain settable=False`（実機検証済 2026-05-09）なので、AGC を切る唯一の手段が Measurement モード。
+- Default モード録音に校正値を入れても、入力レベルが変わると AGC ゲインが動いて絶対 SPL は信用できない。
+- `db_spl()` はこの条件を満たさないとき warning を出すが値は返す（相対比較目的の用途のため）。
 
 ### dB SPL の換算式 (校正済みの場合)
 ```

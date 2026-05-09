@@ -4,7 +4,7 @@ WAV <-> NPZ 変換とロード/解析ヘルパー
 wavfile/*.wav を Python で扱いやすい .npz に変換する。
 スキーマは将来の周波数解析・dB SPL 表示に拡張できる構成。
 
-スキーマ v1.0 (キー一覧):
+スキーマ v1.1 (キー一覧):
   samples                   : np.ndarray   生サンプル shape=(N,) or (N, ch)
   sample_dtype              : str          'int16' など
   samplerate                : int32        Hz
@@ -17,8 +17,10 @@ wavfile/*.wav を Python で扱いやすい .npz に変換する。
   recorded_at               : str          'YYYYMMDD_HHMMSS' (ファイル名から自動抽出)
   label                     : str          ファイル名末尾のラベル
   device                    : str          'iPhone built-in mic' 等
-  mic_orientation           : str          'Front' / 'Back' / ''
-  polar_pattern             : str          'Stereo' / 'Omni' / ''
+  mic_orientation           : str          'Front' / 'Back' / 'Bottom' / ''
+  polar_pattern             : str          'Stereo' / 'Cardioid' / 'Omnidirectional' / ''
+  audio_session_mode        : str          (v1.1+) 'Measurement' (AGC off, SPL校正可) /
+                                           'Default' (AGC on, SPL校正不可) / ''
   preamp_gain_db            : float64      外部ゲイン
   cal_db_spl_at_full_scale  : float64      フルスケール=何 dB SPL か (NaN=未校正)
   cal_ref_freq_hz           : float64      校正基準周波数 (NaN=未校正)
@@ -26,18 +28,22 @@ wavfile/*.wav を Python で扱いやすい .npz に変換する。
   cal_date                  : str          校正実施日
   preprocess                : str          前処理メモ
   notes                     : str          自由記述
-  schema_version            : str          '1.0'
+  schema_version            : str          '1.1'
+
+v1.0 → v1.1 互換: audio_session_mode キーを追加。v1.0 で書かれた .npz は
+load_npz() で読むと audio_session_mode='' (不明) として扱う。
 """
 
 import os
 import re
 import wave
+import warnings
 from datetime import datetime
 
 import numpy as np
 
 
-SCHEMA_VERSION = '1.0'
+SCHEMA_VERSION = '1.1'
 
 _NAME_RE = re.compile(r'^(\d{8})_(\d{6})_(.+)\.wav$', re.IGNORECASE)
 
@@ -75,6 +81,7 @@ def convert_wav_to_npz(
     device='iPhone built-in mic',
     mic_orientation='',
     polar_pattern='',
+    audio_session_mode='',
     preamp_gain_db=0.0,
     cal_db_spl_at_full_scale=float('nan'),
     cal_ref_freq_hz=float('nan'),
@@ -87,6 +94,10 @@ def convert_wav_to_npz(
 
     保存内容のスキーマはモジュールの docstring を参照。
     校正関連フィールドは省略時 NaN/空文字で初期化される。
+
+    audio_session_mode は SPL 校正値の信頼性に直結する。
+    'Measurement' (AGC off) で撮った録音だけが SPL 校正に意味がある。
+    record_mono_calibrated 経由なら 'Measurement' を渡すこと。
     """
     arr, fr, nch, sw, nf = _wav_to_array(wav_path)
     fname = os.path.basename(wav_path)
@@ -108,6 +119,7 @@ def convert_wav_to_npz(
         device=device,
         mic_orientation=mic_orientation,
         polar_pattern=polar_pattern,
+        audio_session_mode=audio_session_mode,
         preamp_gain_db=np.float64(preamp_gain_db),
         cal_db_spl_at_full_scale=np.float64(cal_db_spl_at_full_scale),
         cal_ref_freq_hz=np.float64(cal_ref_freq_hz),
@@ -169,6 +181,11 @@ class WavRecord(object):
         self.device = str(npz['device'])
         self.mic_orientation = str(npz['mic_orientation'])
         self.polar_pattern = str(npz['polar_pattern'])
+        # v1.0 互換: audio_session_mode は v1.1 で追加されたキー
+        if 'audio_session_mode' in npz.files:
+            self.audio_session_mode = str(npz['audio_session_mode'])
+        else:
+            self.audio_session_mode = ''
         self.preamp_gain_db = float(npz['preamp_gain_db'])
         self.cal_db_spl_at_full_scale = float(npz['cal_db_spl_at_full_scale'])
         self.cal_ref_freq_hz = float(npz['cal_ref_freq_hz'])
@@ -181,6 +198,15 @@ class WavRecord(object):
     @property
     def is_calibrated(self):
         return not np.isnan(self.cal_db_spl_at_full_scale)
+
+    @property
+    def is_calibration_trustworthy(self):
+        """校正値が信頼できる条件: 校正済み AND Measurement モードで撮影。
+
+        Default モード (AGC 有効) で撮ったファイルに校正値を入れても、
+        入力レベルが変われば AGC のゲインが動くので絶対 SPL は信用できない。
+        """
+        return self.is_calibrated and self.audio_session_mode == 'Measurement'
 
     def to_float(self, dtype=np.float32):
         """サンプルを -1.0 ~ +1.0 の float に正規化して返す。"""
@@ -214,9 +240,20 @@ class WavRecord(object):
         """校正されていれば dB SPL を返す。未校正なら NaN。
 
         SPL = 20*log10(rms_float) + cal_db_spl_at_full_scale - preamp_gain_db
+
+        校正値が入っていても audio_session_mode が 'Measurement' でない場合
+        は AGC で絶対レベルが信用できないため warning を出す。値そのものは
+        相対比較等の用途で必要になりうるので計算は行う。
         """
         if not self.is_calibrated:
             return float('nan')
+        if self.audio_session_mode != 'Measurement':
+            warnings.warn(
+                'audio_session_mode={!r}: AGC が有効な可能性があり SPL の'
+                '絶対値は信用できません (相対比較目的で使用してください)'
+                .format(self.audio_session_mode),
+                stacklevel=2,
+            )
         return self.dbfs(channel=channel) + self.cal_db_spl_at_full_scale - self.preamp_gain_db
 
     def __repr__(self):
@@ -242,12 +279,17 @@ def update_calibration(
     cal_method=None,
     cal_date=None,
     preamp_gain_db=None,
+    audio_session_mode=None,
 ):
     """既存の .npz に校正情報を後から書き込む (上書き保存)。
 
     None を渡したフィールドは既存値を維持する。
     cal_date を None にして cal_db_spl_at_full_scale を更新した場合は
     本日の日付 (YYYYMMDD) を自動で記録する。
+
+    audio_session_mode は録音時のセッションモードを後追いで記録する用。
+    record_mono_calibrated 経由で撮ったが convert 時に渡し忘れた場合は
+    'Measurement' を後付けすると db_spl() が信用できるようになる。
     """
     rec = load_npz(npz_path)
     if cal_db_spl_at_full_scale is not None:
@@ -262,6 +304,8 @@ def update_calibration(
         rec.cal_date = str(cal_date)
     if preamp_gain_db is not None:
         rec.preamp_gain_db = float(preamp_gain_db)
+    if audio_session_mode is not None:
+        rec.audio_session_mode = str(audio_session_mode)
     np.savez_compressed(
         npz_path,
         samples=rec.samples,
@@ -278,6 +322,7 @@ def update_calibration(
         device=rec.device,
         mic_orientation=rec.mic_orientation,
         polar_pattern=rec.polar_pattern,
+        audio_session_mode=rec.audio_session_mode,
         preamp_gain_db=np.float64(rec.preamp_gain_db),
         cal_db_spl_at_full_scale=np.float64(rec.cal_db_spl_at_full_scale),
         cal_ref_freq_hz=np.float64(rec.cal_ref_freq_hz),
