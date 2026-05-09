@@ -172,8 +172,9 @@ path = record_stereo_with_label(duration=5, orientation='Back')  # 背面マイ�
 
 ```python
 from tools import record_mono_calibrated_with_label
-path = record_mono_calibrated_with_label(duration=5)                   # システム既定 (通常 Bottom Omnidirectional)
-path = record_mono_calibrated_with_label(duration=5, orientation='Front')  # 内蔵マイクの前面データソース
+path = record_mono_calibrated_with_label(duration=5)                   # システム既定 (実機 iPhone12,8 で Front Cardioid が選ばれることを確認)
+path = record_mono_calibrated_with_label(duration=5, orientation='Front')  # 内蔵マイクの前面データソースを明示指定
+path = record_mono_calibrated_with_label(duration=5, orientation='Bottom') # 下面 (Omnidirectional) を明示指定
 ```
 
 **実機検証結果（2026-05-09, iOS 26.4.2 / iPhone12,8）**: Measurement モードと Stereo polar pattern は **両立不可**。Measurement に切り替えると `port.dataSources()` の supportedPolarPatterns から Stereo が外れ、`setPreferredInputNumberOfChannels(2)` も `False` で蹴られる。`session.inputGain settable=False` なので手動ゲイン固定もできず、Measurement モードが AGC を切る唯一の手段。
