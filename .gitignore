@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 *.pyo
 .DS_Store
+
+# 機種固有の校正値 (各 iPhone で異なる)
+calibration_store.json

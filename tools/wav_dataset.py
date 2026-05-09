@@ -152,6 +152,7 @@ def convert_wav_to_npz(
     cal_date='',
     preprocess='',
     notes='',
+    use_default_cal=False,
 ):
     """単一の WAV を .npz に変換する。
 
@@ -161,7 +162,31 @@ def convert_wav_to_npz(
     audio_session_mode は SPL 校正値の信頼性に直結する。
     'Measurement' (AGC off) で撮った録音だけが SPL 校正に意味がある。
     record_mono_calibrated 経由なら 'Measurement' を渡すこと。
+
+    use_default_cal=True かつ cal_db_spl_at_full_scale が NaN の場合、
+    (device, mic_orientation, polar_pattern, audio_session_mode) を
+    キーとして tools.calibration_store から自動で校正値を引いてくる。
+    該当エントリが無ければ warning を出して未校正のまま保存する。
     """
+    if use_default_cal and np.isnan(cal_db_spl_at_full_scale):
+        from .calibration_store import load_default_cal
+        entry = load_default_cal(
+            device, mic_orientation, polar_pattern, audio_session_mode)
+        if entry is None:
+            warnings.warn(
+                'use_default_cal=True だが該当する校正値がストアに無い: '
+                '({}, {}, {}, {}). 未校正で続行。'.format(
+                    device, mic_orientation, polar_pattern, audio_session_mode),
+                stacklevel=2,
+            )
+        else:
+            cal_db_spl_at_full_scale = entry['cal_db_spl_at_full_scale']
+            if np.isnan(cal_ref_freq_hz):
+                cal_ref_freq_hz = entry.get('cal_ref_freq_hz', float('nan'))
+            if not cal_method:
+                cal_method = 'auto-applied default cal: ' + entry.get('cal_method', '')
+            if not cal_date:
+                cal_date = entry.get('cal_date', '')
     arr, fr, nch, sw, nf = _wav_to_array(wav_path)
     fname = os.path.basename(wav_path)
     ts, label = _parse_name(fname)
@@ -541,6 +566,7 @@ def calibrate_from_reference(
     cal_date=None,
     apply_to=(),
     window_sec=None,
+    save_as_default=False,
 ):
     """SPL メータ等の参照読み値から cal_db_spl_at_full_scale を算出して
     npz に書き込む。同条件で撮った他の npz にも一括で同じ校正値を流用可能。
@@ -560,12 +586,17 @@ def calibrate_from_reference(
                           audio_session_mode が一致しないと ValueError
         window_sec:       (start, end) 秒で中央切り出して RMS 計算
                           (立ち上がり/立ち下がりを除外したい場合に)
+        save_as_default:  True なら校正値を tools.calibration_store にも
+                          保存する (Measurement モード限定)。以後の
+                          convert_wav_to_npz(..., use_default_cal=True) で
+                          自動再利用される。
 
     Returns:
         計算された cal_db_spl_at_full_scale (float)
 
     Raises:
         ValueError: apply_to 内の npz の audio_session_mode が参照と異なる場合
+                    save_as_default=True で参照が Measurement でない場合
     """
     rec = load_npz(npz_path)
     if rec.audio_session_mode != 'Measurement':
@@ -621,6 +652,22 @@ def calibrate_from_reference(
             cal_ref_freq_hz=cal_ref_freq_hz,
             cal_method='copied from {} ({})'.format(
                 os.path.basename(npz_path), cal_method),
+            cal_date=cal_date,
+        )
+    if save_as_default:
+        if rec.audio_session_mode != 'Measurement':
+            raise ValueError(
+                'save_as_default=True は Measurement モード参照のみ可: '
+                '参照の audio_session_mode={!r}'.format(rec.audio_session_mode))
+        from .calibration_store import save_default_cal
+        save_default_cal(
+            device=rec.device,
+            mic_orientation=rec.mic_orientation,
+            polar_pattern=rec.polar_pattern,
+            audio_session_mode=rec.audio_session_mode,
+            cal_db_spl_at_full_scale=cal,
+            cal_ref_freq_hz=cal_ref_freq_hz,
+            cal_method=cal_method,
             cal_date=cal_date,
         )
     return cal

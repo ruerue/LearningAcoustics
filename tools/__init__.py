@@ -20,6 +20,12 @@ from .wav_dataset import (
     a_weighting_db,
     c_weighting_db,
 )
+from .calibration_store import (
+    save_default_cal,
+    load_default_cal,
+    list_default_cals,
+    remove_default_cal,
+)
 
 __all__ = [
     'record_audio',
@@ -38,4 +44,8 @@ __all__ = [
     'calibrate_from_reference',
     'a_weighting_db',
     'c_weighting_db',
+    'save_default_cal',
+    'load_default_cal',
+    'list_default_cals',
+    'remove_default_cal',
 ]
