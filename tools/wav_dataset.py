@@ -45,6 +45,29 @@ import numpy as np
 
 SCHEMA_VERSION = '1.1'
 
+
+def _window(name, n):
+    """numpy のみの窓関数ディスパッチ。"""
+    if name == 'hann':
+        return np.hanning(n).astype(np.float64)
+    if name == 'hamming':
+        return np.hamming(n).astype(np.float64)
+    if name == 'blackman':
+        return np.blackman(n).astype(np.float64)
+    if name in ('rect', 'boxcar', 'rectangular'):
+        return np.ones(n, dtype=np.float64)
+    raise ValueError('未対応の window: {!r}'.format(name))
+
+
+def _third_octave_bands(fmin=20.0, fmax=20000.0):
+    """ISO 1/3 オクターブの中心周波数と帯域端を返す (1000 Hz 基準)。"""
+    n_lo = int(np.floor(np.log2(fmin / 1000.0) * 3))
+    n_hi = int(np.ceil(np.log2(fmax / 1000.0) * 3))
+    centers = 1000.0 * 2.0 ** (np.arange(n_lo, n_hi + 1) / 3.0)
+    edges_lo = centers / (2.0 ** (1.0 / 6.0))
+    edges_hi = centers * (2.0 ** (1.0 / 6.0))
+    return centers, edges_lo, edges_hi
+
 _NAME_RE = re.compile(r'^(\d{8})_(\d{6})_(.+)\.wav$', re.IGNORECASE)
 
 
@@ -255,6 +278,104 @@ class WavRecord(object):
                 stacklevel=2,
             )
         return self.dbfs(channel=channel) + self.cal_db_spl_at_full_scale - self.preamp_gain_db
+
+    def _channel_data(self, channel):
+        """指定チャンネルを 1D float64 で返す内部ヘルパ。"""
+        x = self.to_float(np.float64)
+        if x.ndim == 2:
+            x = x[:, channel]
+        return x
+
+    def psd(self, channel=0, nperseg=8192, overlap=0.5, window='hann'):
+        """Welch 法による片側 PSD を返す (numpy のみ実装)。
+
+        Args:
+            channel:  解析対象チャンネル (mono なら 0)
+            nperseg:  セグメント長 (信号より長ければ自動で短縮)
+            overlap:  セグメント間オーバーラップ率 (0.0 - <1.0)
+            window:   'hann' / 'hamming' / 'blackman' / 'rect'
+
+        Returns:
+            (f, psd): f は Hz の 1D 配列、
+                     psd は (FS-unit)^2/Hz の 1D 配列 (片側補正済)
+        """
+        x = self._channel_data(channel)
+        fs = self.samplerate
+        n = int(min(nperseg, len(x)))
+        if n < 8:
+            raise ValueError('信号が短すぎる (n={})'.format(n))
+        w = _window(window, n)
+        step = max(1, int(n * (1.0 - overlap)))
+        n_seg = 1 + (len(x) - n) // step
+        if n_seg < 1:
+            raise ValueError('信号が短すぎる (segments=0)')
+        norm = fs * float(np.sum(w ** 2))
+        psd_acc = np.zeros(n // 2 + 1, dtype=np.float64)
+        for i in range(n_seg):
+            s = i * step
+            seg = x[s:s + n] * w
+            X = np.fft.rfft(seg)
+            p = (np.abs(X) ** 2) / norm
+            p[1:-1] *= 2.0
+            psd_acc += p
+        psd_acc /= n_seg
+        f = np.fft.rfftfreq(n, d=1.0 / fs)
+        return f, psd_acc
+
+    def psd_db_per_hz(self, channel=0, nperseg=8192, overlap=0.5, window='hann'):
+        """PSD を dB に直したもの。
+
+        校正済 → dB SPL / sqrt(Hz)
+        未校正 → dBFS / sqrt(Hz)
+        校正済かつ Measurement モードでない場合は warning を出す。
+        """
+        f, psd_lin = self.psd(channel=channel, nperseg=nperseg,
+                              overlap=overlap, window=window)
+        db = 10.0 * np.log10(psd_lin + 1e-30)
+        if self.is_calibrated:
+            db = db + self.cal_db_spl_at_full_scale - self.preamp_gain_db
+            if self.audio_session_mode != 'Measurement':
+                warnings.warn(
+                    'audio_session_mode={!r}: SPL 絶対値は信用できません'
+                    .format(self.audio_session_mode),
+                    stacklevel=2,
+                )
+        return f, db
+
+    def band_spl_third_octave(
+        self, channel=0, fmin=20.0, fmax=20000.0,
+        nperseg=8192, overlap=0.5, window='hann',
+    ):
+        """1/3 オクターブ帯域 SPL (校正済) もしくは dBFS (未校正)。
+
+        Returns:
+            (centers, db): 中心周波数 (Hz) と帯域 dB の 1D 配列。
+                           Nyquist より上の帯域は除外される。
+        """
+        f, psd_lin = self.psd(channel=channel, nperseg=nperseg,
+                              overlap=overlap, window=window)
+        centers, lo, hi = _third_octave_bands(fmin, fmax)
+        df = float(f[1] - f[0])
+        cal_off = (self.cal_db_spl_at_full_scale - self.preamp_gain_db
+                   if self.is_calibrated else 0.0)
+        out_c = []
+        out_db = []
+        for c, fl, fh in zip(centers, lo, hi):
+            if fh > f[-1]:
+                break
+            mask = (f >= fl) & (f < fh)
+            if not np.any(mask):
+                continue
+            ms = float(np.sum(psd_lin[mask]) * df)
+            out_c.append(c)
+            out_db.append(10.0 * np.log10(ms + 1e-30) + cal_off)
+        if self.is_calibrated and self.audio_session_mode != 'Measurement':
+            warnings.warn(
+                'audio_session_mode={!r}: SPL 絶対値は信用できません'
+                .format(self.audio_session_mode),
+                stacklevel=2,
+            )
+        return np.array(out_c), np.array(out_db)
 
     def __repr__(self):
         return (
