@@ -401,6 +401,44 @@ print('cal_db_spl_at_full_scale =', cal)
 なるのを防ぐため)。立ち上がり/立ち下がりを除いて中央のみで RMS を取りたい場合は
 `window_sec=(start, end)` を渡す。
 
+### 校正値の永続化 (一度測ったら使い回す)
+
+`cal_db_spl_at_full_scale` は (機種, データソース, polar pattern, Measurement モード)
+固定ならハードウェア定数。毎回校正し直す必要は無い。`tools.calibration_store`
+に保存して `convert_wav_to_npz` から自動再利用できる。
+
+```python
+from tools import calibrate_from_reference, convert_wav_to_npz, load_npz
+
+# === 一度だけ: 校正値を測ってストアに保存 ===
+calibrate_from_reference(
+    'dataset/20260509_calref.npz',
+    reference_db_spl=70.5,
+    save_as_default=True,   # ← calibration_store.json に書き込む
+)
+
+# === 以後の録音すべて: ストアから自動取得 ===
+convert_wav_to_npz(
+    'wavfile/20260520_meas.wav',
+    'dataset/20260520_meas.npz',
+    audio_session_mode='Measurement',
+    mic_orientation='Front',
+    polar_pattern='Cardioid',
+    use_default_cal=True,   # ← (機種, orientation, polar, mode) のキーで自動引き
+)
+rec = load_npz('dataset/20260520_meas.npz')
+print(rec.db_spl())   # 即 dB SPL
+```
+
+ストアは `<project_root>/calibration_store.json` (機種固有なので `.gitignore` 済)。
+キー `'<device>|<mic_orientation>|<polar_pattern>|<audio_session_mode>'` ごとに
+1 エントリ。Measurement 以外は `save_default_cal` が `ValueError` を出す。
+登録一覧は `tools.list_default_cals()`、削除は `tools.remove_default_cal(...)`。
+
+再校正が必要な条件: マイク穴を塞ぐ物理変化 (ケース変更等) / iOS の major update /
+データソースを Front から Bottom に切り替え / 機種変更。同じ条件で撮るかぎり
+ストアの値はそのまま再利用できる。
+
 ### 使い方
 ```python
 from tools import convert_dir, load_npz, update_calibration
