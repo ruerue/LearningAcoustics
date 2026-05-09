@@ -398,45 +398,65 @@ def record_mono_calibrated(output_path, duration=5, orientation='', samplerate=4
     return output_path
 
 
-def record_mono_calibrated_with_label(duration=5, orientation='', samplerate=48000):
-    """ラベル入力ダイアログ付きの SPL 校正用 mono 録音。
+def _ask_label(title, prompt, hint):
+    import dialogs
+    label = dialogs.input_alert(title, prompt, '', hint)
+    if label is None:
+        return None
+    label = label.strip().replace(' ', '_')
+    return label or 'noname'
 
-    保存先: <project_root>/wavfile/YYYYMMDD_HHMMSS_<label>.wav
+
+def _project_subdir(name):
+    proj = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    d = os.path.join(proj, name)
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def record_calibrated(
+    duration=5,
+    label=None,
+    output_path=None,
+    orientation='',
+    samplerate=48000,
+):
+    """SPL 校正用の mono 録音 (Measurement モード, AGC OFF)。
+
+    すべて省略可:
+        record_calibrated()                 # ラベルダイアログ → wavfile/ に保存
+        record_calibrated(duration=10)      # 録音時間だけ指定
+        record_calibrated(label='test')     # ダイアログ無しでラベル指定
+        record_calibrated(output_path='/path/to/foo.wav')   # 直接指定
 
     Args:
         duration:    録音秒数
-        orientation: '' / 'Front' / 'Back' / 'Bottom'
+        label:       None でラベル入力ダイアログ。明示指定なら dialog なし。
+                     output_path を渡せば label は無視される。
+        output_path: フルパス指定。None ならラベル + タイムスタンプから生成。
+        orientation: '' / 'Front' / 'Back' / 'Bottom' (内蔵マイクのデータソース)
         samplerate:  Hz (例 48000)
 
     Returns:
         保存パス。キャンセル時は None。
     """
-    import dialogs
+    if output_path is None:
+        if label is None:
+            label = _ask_label(
+                'ラベル入力',
+                'SPL 校正用 mono 録音のラベル',
+                'ラベル (例: test, room_noise)',
+            )
+            if label is None:
+                print('キャンセルされました')
+                return None
+        else:
+            label = (label or '').strip().replace(' ', '_') or 'noname'
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        wavfile_dir = _project_subdir('wavfile')
+        output_path = os.path.join(wavfile_dir, f'{timestamp}_{label}.wav')
 
-    label = dialogs.input_alert(
-        'ラベル入力',
-        'SPL 校正用 mono 録音のラベル',
-        '',
-        'ラベル (例: calref, pinknoise)'
-    )
-    if label is None:
-        print('キャンセルされました')
-        return None
-
-    label = label.strip().replace(' ', '_')
-    if not label:
-        label = 'noname'
-
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    filename = f'{timestamp}_{label}.wav'
-
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    wavfile_dir = os.path.join(project_root, 'wavfile')
-    os.makedirs(wavfile_dir, exist_ok=True)
-
-    output_path = os.path.join(wavfile_dir, filename)
-
-    print(f'🎙️ Mono 校正録音開始: {filename}')
+    print(f'🎙️ Mono 校正録音開始: {os.path.basename(output_path)}')
     print(f'📍 時間: {duration} 秒')
 
     record_mono_calibrated(
@@ -446,3 +466,90 @@ def record_mono_calibrated_with_label(duration=5, orientation='', samplerate=480
 
     print(f'✓ 保存先: {output_path}')
     return output_path
+
+
+def record_reference(
+    duration=10,
+    label=None,
+    reference_db_spl=None,
+    orientation='',
+    samplerate=48000,
+    save_as_default=True,
+):
+    """SPL 校正のための参照録音 + 校正実行をワンショットで行う。
+
+    流れ:
+        1. (label/reference_db_spl が None なら) ダイアログで入力
+        2. Measurement モードで mono 録音 → ref_data/<date>_<label>.wav
+        3. <wav>.meta.json サイドカー書き出し
+        4. ref_data/<date>_<label>.npz に変換 (cal 値含む)
+        5. save_as_default=True なら calibration_store.json にも保存
+
+    以後の通常録音は record_calibrated() + convert_wav_to_npz() のみで
+    自動的に dB SPL が出るようになる。
+
+    Args:
+        duration:         録音秒数 (default 10)
+        label:            None でダイアログ
+        reference_db_spl: SLM 等の読み値 (dB SPL)。None でダイアログ
+        orientation:      '' / 'Front' / 'Back' / 'Bottom'
+        samplerate:       Hz
+        save_as_default:  True なら校正値を calibration_store に保存
+
+    Returns:
+        (npz_path, cal_db_spl_at_full_scale)。キャンセル時は (None, None)。
+    """
+    import dialogs
+
+    if label is None:
+        label = _ask_label(
+            '校正参照録音',
+            'ラベル (例: calref_pinknoise)',
+            'ラベル',
+        )
+        if label is None:
+            print('キャンセルされました')
+            return None, None
+    else:
+        label = (label or '').strip().replace(' ', '_') or 'calref'
+
+    if reference_db_spl is None:
+        s = dialogs.input_alert(
+            'SLM 読み値',
+            'NIOSH SLM 等の読み値 (dB SPL, Leq 推奨)',
+            '70.0',
+            'dB SPL',
+        )
+        if s is None:
+            print('キャンセルされました')
+            return None, None
+        try:
+            reference_db_spl = float(s.strip())
+        except (TypeError, ValueError):
+            print(f'数値変換失敗: {s!r}')
+            return None, None
+
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    refdir = _project_subdir('ref_data')
+    wav_path = os.path.join(refdir, f'{timestamp}_{label}.wav')
+    npz_path = wav_path.replace('.wav', '.npz')
+
+    print(f'🎙️ 参照録音 (SLM={reference_db_spl} dB SPL): {os.path.basename(wav_path)}')
+    print(f'📍 時間: {duration} 秒')
+    record_mono_calibrated(
+        wav_path, duration=duration,
+        orientation=orientation, samplerate=samplerate,
+    )
+    print(f'✓ 保存先: {wav_path}')
+
+    from .wav_dataset import convert_wav_to_npz, calibrate_from_reference
+    convert_wav_to_npz(wav_path, npz_path)
+    cal = calibrate_from_reference(
+        npz_path, reference_db_spl,
+        save_as_default=save_as_default,
+        cal_method=f'NIOSH SLM transfer ({reference_db_spl:.2f} dB SPL)',
+    )
+    print(f'✓ cal_db_spl_at_full_scale = {cal:.2f}')
+    if save_as_default:
+        print('✓ calibration_store.json に保存しました')
+    return npz_path, cal

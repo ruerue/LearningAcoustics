@@ -33,6 +33,9 @@ src/                 # Execution scripts (iOS ready)
 └── __init__.py
 
 wavfile/             # Recorded WAV files (auto-created at runtime)
+                     # 録音時に <basename>.meta.json サイドカーも書き出される
+ref_data/            # SPL 校正用の参照録音 + cal 結果 (auto-created)
+                     # record_reference() で SLM 読み値とともにここに集約
 dataset/             # WAV から変換した .npz (解析用、auto-created)
 ```
 
@@ -166,22 +169,37 @@ path = record_stereo_with_label(duration=5, orientation='Back')  # 背面マイ�
 
 **Verified on device**: iPhone内蔵マイクのStereoポーラーパターンで2chステレオ録音動作確認済み（2026-05-04）。
 
-### SPL 校正用 Mono 録音 — `record_mono_calibrated_with_label`
+### SPL 校正用 Mono 録音 — `record_calibrated`
 
-`AVAudioSessionModeMeasurement` で AGC を無効化した mono 録音。SPL 校正値が物理的意味を持つのはこの API で撮ったファイルのみ。
+`AVAudioSessionModeMeasurement` で AGC を無効化した mono 録音。SPL 校正値が物理的意味を持つのはこの API で撮ったファイルのみ。録音と同時に `<wav_basename>.meta.json` サイドカーが書き出され、後段の `convert_wav_to_npz` が自動で読む。
 
 ```python
-from tools import record_mono_calibrated_with_label
-path = record_mono_calibrated_with_label(duration=5)                   # システム既定 (実機 iPhone12,8 で Front Cardioid が選ばれることを確認)
-path = record_mono_calibrated_with_label(duration=5, orientation='Front')  # 内蔵マイクの前面データソースを明示指定
-path = record_mono_calibrated_with_label(duration=5, orientation='Bottom') # 下面 (Omnidirectional) を明示指定
+from tools import record_calibrated
+path = record_calibrated()                              # ラベルダイアログ → wavfile/<date>_<label>.wav
+path = record_calibrated(duration=10)                   # 録音時間だけ指定
+path = record_calibrated(label='room_noise')            # ダイアログ無し
+path = record_calibrated(orientation='Front')           # 内蔵マイクの前面データソース
+path = record_calibrated(orientation='Bottom')          # 下面 (Omnidirectional)
 ```
+
+### SPL 校正の参照録音 — `record_reference`
+
+校正用の参照録音 + 校正計算 + ストア保存を 1 コマンドで実行。`ref_data/` に WAV / npz / サイドカーが集約される。
+
+```python
+from tools import record_reference
+npz_path, cal = record_reference()                       # ラベル + SLM 値ダイアログ → ref_data/ → store
+npz_path, cal = record_reference(reference_db_spl=70.5)  # SLM 値だけ事前指定
+```
+
+以後は `record_calibrated()` + `convert_wav_to_npz(wav)` で自動的に dB SPL が出る。
 
 **実機検証結果（2026-05-09, iOS 26.4.2 / iPhone12,8）**: Measurement モードと Stereo polar pattern は **両立不可**。Measurement に切り替えると `port.dataSources()` の supportedPolarPatterns から Stereo が外れ、`setPreferredInputNumberOfChannels(2)` も `False` で蹴られる。`session.inputGain settable=False` なので手動ゲイン固定もできず、Measurement モードが AGC を切る唯一の手段。
 
 → 用途別に API を二段構え:
 - 楽しみ用ステレオ録音 → `record_stereo_with_label` (Default mode + Stereo polar)
-- SPL 校正録音 / 解析用 → `record_mono_calibrated_with_label` (Measurement mode + mono)
+- SPL 校正録音 / 解析用 → `record_calibrated` (Measurement mode + mono)
+- SPL 校正参照録音 → `record_reference` (上記 + SLM 値転送)
 
 #### AVAudioSession ステレオ設定の正しい順序
 
@@ -380,7 +398,7 @@ NIOSH Sound Level Meter (無料・iPhone 機種ごとに較正済) などを参�
 ```python
 from tools import calibrate_from_reference
 
-# 1) record_mono_calibrated_with_label で定常騒音を 5–10 秒録音
+# 1) record_calibrated で定常騒音を 5–10 秒録音
 # 2) NIOSH SLM で同じ場所・同じ音量での Leq を読む (例: 70.5 dB SPL)
 # 3) 録音を npz 化 (audio_session_mode='Measurement' を必ず渡す)
 # 4) calibrate_from_reference で校正値を計算・書き込み

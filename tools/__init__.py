@@ -7,7 +7,8 @@ from .recording import (
     record_stereo,
     record_stereo_with_label,
     record_mono_calibrated,
-    record_mono_calibrated_with_label,
+    record_calibrated,
+    record_reference,
 )
 from .wav_dataset import (
     SCHEMA_VERSION,
@@ -34,7 +35,8 @@ __all__ = [
     'record_stereo',
     'record_stereo_with_label',
     'record_mono_calibrated',
-    'record_mono_calibrated_with_label',
+    'record_calibrated',
+    'record_reference',
     'SCHEMA_VERSION',
     'WavRecord',
     'convert_wav_to_npz',
