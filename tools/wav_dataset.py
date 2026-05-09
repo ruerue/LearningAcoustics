@@ -333,3 +333,97 @@ def update_calibration(
         schema_version=SCHEMA_VERSION,
     )
     return npz_path
+
+
+def calibrate_from_reference(
+    npz_path,
+    reference_db_spl,
+    channel=0,
+    cal_ref_freq_hz=float('nan'),
+    cal_method=None,
+    cal_date=None,
+    apply_to=(),
+    window_sec=None,
+):
+    """SPL メータ等の参照読み値から cal_db_spl_at_full_scale を算出して
+    npz に書き込む。同条件で撮った他の npz にも一括で同じ校正値を流用可能。
+
+    校正式:
+        SPL = dBFS + cal_db_spl_at_full_scale - preamp_gain_db
+        => cal_db_spl_at_full_scale = reference_db_spl - dBFS + preamp_gain_db
+
+    Args:
+        npz_path:         校正用録音 (定常騒音を撮ったもの) の .npz パス
+        reference_db_spl: 参照デバイスでの SPL 読み値 (dB SPL, Leq 推奨)
+        channel:          解析対象チャンネル (mono なら 0)
+        cal_ref_freq_hz:  1kHz 純音校正なら 1000.0、広帯域なら NaN
+        cal_method:       校正方法のメモ。None で自動生成
+        cal_date:         校正日 (None で今日, YYYYMMDD)
+        apply_to:         同条件で撮った他の npz パスのリスト
+                          audio_session_mode が一致しないと ValueError
+        window_sec:       (start, end) 秒で中央切り出して RMS 計算
+                          (立ち上がり/立ち下がりを除外したい場合に)
+
+    Returns:
+        計算された cal_db_spl_at_full_scale (float)
+
+    Raises:
+        ValueError: apply_to 内の npz の audio_session_mode が参照と異なる場合
+    """
+    rec = load_npz(npz_path)
+    if rec.audio_session_mode != 'Measurement':
+        warnings.warn(
+            '校正用録音の audio_session_mode={!r}: 推奨は Measurement。'
+            'Default モードでは AGC/処理の影響で校正値の物理的意味が弱まる。'
+            .format(rec.audio_session_mode),
+            stacklevel=2,
+        )
+    if window_sec is None:
+        dbfs = rec.dbfs(channel=channel)
+    else:
+        x = rec.to_float(np.float64)
+        if x.ndim == 2:
+            x = x[:, channel]
+        s = max(0, int(window_sec[0] * rec.samplerate))
+        e = min(len(x), int(window_sec[1] * rec.samplerate))
+        if e <= s:
+            raise ValueError('window_sec={} が無効'.format(window_sec))
+        seg = x[s:e]
+        rms = float(np.sqrt(np.mean(seg ** 2)))
+        dbfs = 20.0 * np.log10(rms + 1e-20)
+    if dbfs < -55.0:
+        warnings.warn(
+            '校正用録音の dBFS={:.1f} は低すぎる可能性 (ノイズフロア相当)。'
+            'スピーカ音量を上げて再録音を推奨。'.format(dbfs),
+            stacklevel=2,
+        )
+    cal = float(reference_db_spl) - dbfs + rec.preamp_gain_db
+    if cal_method is None:
+        cal_method = 'SLM transfer (ref={:.2f} dB SPL'.format(reference_db_spl)
+        if not np.isnan(cal_ref_freq_hz):
+            cal_method += ' @ {:.0f} Hz'.format(cal_ref_freq_hz)
+        cal_method += ')'
+    update_calibration(
+        npz_path,
+        cal_db_spl_at_full_scale=cal,
+        cal_ref_freq_hz=cal_ref_freq_hz,
+        cal_method=cal_method,
+        cal_date=cal_date,
+    )
+    for p in apply_to:
+        other = load_npz(p)
+        if other.audio_session_mode != rec.audio_session_mode:
+            raise ValueError(
+                'apply_to 不一致: {!r} の audio_session_mode={!r} は '
+                '参照 {!r} の {!r} と異なる。校正値は流用できない。'
+                .format(p, other.audio_session_mode,
+                        npz_path, rec.audio_session_mode))
+        update_calibration(
+            p,
+            cal_db_spl_at_full_scale=cal,
+            cal_ref_freq_hz=cal_ref_freq_hz,
+            cal_method='copied from {} ({})'.format(
+                os.path.basename(npz_path), cal_method),
+            cal_date=cal_date,
+        )
+    return cal

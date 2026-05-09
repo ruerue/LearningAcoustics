@@ -370,6 +370,36 @@ SPL_dB = 20 * log10(rms_float) + cal_db_spl_at_full_scale - preamp_gain_db
 ```
 - `rms_float` は `samples / full_scale` の RMS (-1〜1 正規化)
 - 校正は `tools.update_calibration(npz_path, cal_db_spl_at_full_scale=..., ...)` で後追い記入できる
+- 推奨は `tools.calibrate_from_reference()` (下記)
+
+### SPL メータ転送による校正手順 (追加機材なし)
+
+NIOSH Sound Level Meter (無料・iPhone 機種ごとに較正済) などを参照標準として
+使い、校正値を自動算出する。
+
+```python
+from tools import calibrate_from_reference
+
+# 1) record_mono_calibrated_with_label で定常騒音を 5–10 秒録音
+# 2) NIOSH SLM で同じ場所・同じ音量での Leq を読む (例: 70.5 dB SPL)
+# 3) 録音を npz 化 (audio_session_mode='Measurement' を必ず渡す)
+# 4) calibrate_from_reference で校正値を計算・書き込み
+
+cal = calibrate_from_reference(
+    'dataset/20260509_calref.npz',
+    reference_db_spl=70.5,
+    apply_to=[             # 同じ orientation / 同じ Measurement モードで撮った
+        'dataset/20260509_meas_a.npz',
+        'dataset/20260509_meas_b.npz',
+    ],
+)
+print('cal_db_spl_at_full_scale =', cal)
+```
+
+`apply_to` の各 npz が参照と異なる `audio_session_mode` を持つ場合は
+`ValueError` で停止する (Measurement の校正値を Default 録音に流用すると不正確に
+なるのを防ぐため)。立ち上がり/立ち下がりを除いて中央のみで RMS を取りたい場合は
+`window_sec=(start, end)` を渡す。
 
 ### 使い方
 ```python

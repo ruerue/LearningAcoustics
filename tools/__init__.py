@@ -16,6 +16,7 @@ from .wav_dataset import (
     convert_dir,
     load_npz,
     update_calibration,
+    calibrate_from_reference,
 )
 
 __all__ = [
@@ -32,4 +33,5 @@ __all__ = [
     'convert_dir',
     'load_npz',
     'update_calibration',
+    'calibrate_from_reference',
 ]
