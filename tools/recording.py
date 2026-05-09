@@ -121,6 +121,10 @@ def _configure_stereo_session(orientation='Front'):
 
     session.setActive_error_(False, None)
     session.setCategory_error_('AVAudioSessionCategoryPlayAndRecord', None)
+    # 直前に record_mono_calibrated を呼んでいた場合、AVAudioSession のモードが
+    # 'Measurement' に残っていると Stereo polar pattern が利用不能なので、
+    # 明示的に Default に戻す。
+    session.setMode_error_('AVAudioSessionModeDefault', None)
 
     available_inputs = session.availableInputs()
     builtin_port = None
