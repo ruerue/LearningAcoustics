@@ -429,21 +429,26 @@ update_calibration(
 ## 今後の予定 (Roadmap)
 
 ### B案 (`tools/wav_dataset.py` の機能拡張)
-保存スキーマは v1.0 で固まったので、以下は読み込み側に追加していく方針:
+保存スキーマは v1.1 で安定。以下は読み込み側の追加機能:
 
-1. **周波数解析ヘルパー** (numpy のみで実装。scipy 不可のため `np.fft` を使用)
-   - `WavRecord.spectrum(channel=0, n_fft=None, window='hann')` → (freq, magnitude_db)
-   - `WavRecord.spectrogram(channel=0, n_fft=2048, hop=512, window='hann')` → (freqs, times, S_db)
-   - 窓関数は `np.hanning` / `np.hamming` / `np.blackman` などを内製ディスパッチ
-2. **dB SPL 表示**
+1. **周波数解析ヘルパー** ✅ 実装済 (numpy のみ, `np.fft` 利用)
+   - `WavRecord.psd(channel=0, nperseg=8192, overlap=0.5, window='hann')` → (f, psd_linear)
+   - `WavRecord.psd_db_per_hz(...)` → (f, db) 校正済なら dB SPL/√Hz、未校正なら dBFS/√Hz
+   - `WavRecord.band_spl_third_octave(channel=0, fmin=20, fmax=20000, ...)` → (centers, db)
+   - 窓関数: `'hann'` / `'hamming'` / `'blackman'` / `'rect'`
+2. **dB SPL 時系列**
    - `WavRecord.db_spl_series(channel=0, frame_ms=125)` → 時間連続 SPL
-   - 校正済みのみ動作、未校正なら明示的に `RuntimeError`
-3. **可視化 (matplotlib)**
+   - 未実装。Fast (125ms) / Slow (1s) の時間平均で SPL タイムラインを返す予定
+3. **スペクトログラム**
+   - `WavRecord.spectrogram(channel=0, nperseg=2048, hop=512, window='hann')` → (f, t, S_db)
+   - 未実装
+4. **可視化 (matplotlib)**
    - 別モジュール `tools/plotting.py` を作る案
    - 波形 / スペクトル / スペクトログラム / dB SPL タイムライン
-4. **校正ワークフロー**
-   - ピストンホン (94 dB SPL @ 1 kHz 等) 録音から `cal_db_spl_at_full_scale` を自動算出するヘルパー
-   - `tools.calibrate_from_reference(npz_path, ref_db_spl=94.0, ref_freq_hz=1000.0)`
+5. **校正ワークフロー** ✅ 実装済
+   - `tools.calibrate_from_reference(npz_path, reference_db_spl, ...)` で SLM 転送校正
+6. **A 特性 / C 特性 (dBA / dBC)**
+   - 未実装。IEC 61672 の周波数領域近似で band_spl_third_octave に重み合算する想定
 
 ### スキーマを増やす際のルール
 - 既存キーの**型・意味は変更しない**
