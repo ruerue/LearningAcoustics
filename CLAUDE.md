@@ -447,8 +447,11 @@ update_calibration(
    - 波形 / スペクトル / スペクトログラム / dB SPL タイムライン
 5. **校正ワークフロー** ✅ 実装済
    - `tools.calibrate_from_reference(npz_path, reference_db_spl, ...)` で SLM 転送校正
-6. **A 特性 / C 特性 (dBA / dBC)**
-   - 未実装。IEC 61672 の周波数領域近似で band_spl_third_octave に重み合算する想定
+6. **A 特性 / C 特性 (dBA / dBC)** ✅ 実装済 (IEC 61672 周波数領域近似)
+   - `tools.a_weighting_db(f)` / `tools.c_weighting_db(f)` で重み曲線取得
+   - `WavRecord.band_spl_third_octave(weighting='A' or 'C' or 'Z')`
+   - `WavRecord.weighted_spl(weighting='A')` で LAeq 単一値
+   - 重みは PSD 段階で線形二乗振幅 (10^(dB/10)) を乗じてから帯域積分
 
 ### スキーマを増やす際のルール
 - 既存キーの**型・意味は変更しない**

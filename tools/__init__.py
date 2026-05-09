@@ -17,6 +17,8 @@ from .wav_dataset import (
     load_npz,
     update_calibration,
     calibrate_from_reference,
+    a_weighting_db,
+    c_weighting_db,
 )
 
 __all__ = [
@@ -34,4 +36,6 @@ __all__ = [
     'load_npz',
     'update_calibration',
     'calibrate_from_reference',
+    'a_weighting_db',
+    'c_weighting_db',
 ]

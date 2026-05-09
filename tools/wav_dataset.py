@@ -68,6 +68,46 @@ def _third_octave_bands(fmin=20.0, fmax=20000.0):
     edges_hi = centers * (2.0 ** (1.0 / 6.0))
     return centers, edges_lo, edges_hi
 
+
+def a_weighting_db(f):
+    """IEC 61672 A 特性の周波数応答 (dB)。1 kHz で 0 dB に正規化済 (+2.00 dB)。
+
+    f はスカラもしくは ndarray。f<=0 では -inf を返す。
+    """
+    f = np.asarray(f, dtype=np.float64)
+    f2 = f * f
+    num = (12194.0 ** 2) * (f2 ** 2)
+    den = (
+        (f2 + 20.6 ** 2)
+        * np.sqrt((f2 + 107.7 ** 2) * (f2 + 737.9 ** 2))
+        * (f2 + 12194.0 ** 2)
+    )
+    safe_den = np.where(den > 0, den, np.inf)
+    ra = num / safe_den
+    return 20.0 * np.log10(np.where(ra > 0, ra, 1e-30)) + 2.00
+
+
+def c_weighting_db(f):
+    """IEC 61672 C 特性の周波数応答 (dB)。1 kHz で 0 dB に正規化済 (+0.06 dB)。"""
+    f = np.asarray(f, dtype=np.float64)
+    f2 = f * f
+    num = (12194.0 ** 2) * f2
+    den = (f2 + 20.6 ** 2) * (f2 + 12194.0 ** 2)
+    safe_den = np.where(den > 0, den, np.inf)
+    rc = num / safe_den
+    return 20.0 * np.log10(np.where(rc > 0, rc, 1e-30)) + 0.06
+
+
+def _weighting_psd_lin(f, weighting):
+    """PSD に乗じる線形重み (二乗振幅応答)。'Z'/'A'/'C' を受け付ける。"""
+    if weighting in (None, '', 'Z', 'z'):
+        return np.ones_like(np.asarray(f, dtype=np.float64))
+    if weighting in ('A', 'a'):
+        return 10.0 ** (a_weighting_db(f) / 10.0)
+    if weighting in ('C', 'c'):
+        return 10.0 ** (c_weighting_db(f) / 10.0)
+    raise ValueError('未対応の weighting: {!r}'.format(weighting))
+
 _NAME_RE = re.compile(r'^(\d{8})_(\d{6})_(.+)\.wav$', re.IGNORECASE)
 
 
@@ -344,16 +384,24 @@ class WavRecord(object):
 
     def band_spl_third_octave(
         self, channel=0, fmin=20.0, fmax=20000.0,
+        weighting='Z',
         nperseg=8192, overlap=0.5, window='hann',
     ):
         """1/3 オクターブ帯域 SPL (校正済) もしくは dBFS (未校正)。
 
+        Args:
+            weighting: 'Z' (重み無し, 既定) / 'A' (A 特性) / 'C' (C 特性)
+                       'A' / 'C' のときは PSD 段階で IEC 61672 重みを乗じてから
+                       帯域積分する。
+
         Returns:
             (centers, db): 中心周波数 (Hz) と帯域 dB の 1D 配列。
                            Nyquist より上の帯域は除外される。
+                           校正済なら dB SPL (Z/A/C)、未校正なら dBFS。
         """
         f, psd_lin = self.psd(channel=channel, nperseg=nperseg,
                               overlap=overlap, window=window)
+        psd_w = psd_lin * _weighting_psd_lin(f, weighting)
         centers, lo, hi = _third_octave_bands(fmin, fmax)
         df = float(f[1] - f[0])
         cal_off = (self.cal_db_spl_at_full_scale - self.preamp_gain_db
@@ -366,7 +414,7 @@ class WavRecord(object):
             mask = (f >= fl) & (f < fh)
             if not np.any(mask):
                 continue
-            ms = float(np.sum(psd_lin[mask]) * df)
+            ms = float(np.sum(psd_w[mask]) * df)
             out_c.append(c)
             out_db.append(10.0 * np.log10(ms + 1e-30) + cal_off)
         if self.is_calibrated and self.audio_session_mode != 'Measurement':
@@ -376,6 +424,34 @@ class WavRecord(object):
                 stacklevel=2,
             )
         return np.array(out_c), np.array(out_db)
+
+    def weighted_spl(
+        self, channel=0, weighting='A',
+        nperseg=8192, overlap=0.5, window='hann',
+    ):
+        """全帯域の重み付き SPL (LAeq / LCeq / LZeq)。
+
+        校正済 → dB(weight) SPL、未校正 → dB(weight) FS (相対比較用)。
+        weighting='Z' のときは Parseval 等価で db_spl() / dbfs() に近い値になる。
+
+        Args:
+            weighting: 'A' (既定) / 'C' / 'Z'
+        """
+        f, psd_lin = self.psd(channel=channel, nperseg=nperseg,
+                              overlap=overlap, window=window)
+        psd_w = psd_lin * _weighting_psd_lin(f, weighting)
+        df = float(f[1] - f[0])
+        ms = float(np.sum(psd_w) * df)
+        db = 10.0 * np.log10(ms + 1e-30)
+        if self.is_calibrated:
+            db = db + self.cal_db_spl_at_full_scale - self.preamp_gain_db
+            if self.audio_session_mode != 'Measurement':
+                warnings.warn(
+                    'audio_session_mode={!r}: SPL 絶対値は信用できません'
+                    .format(self.audio_session_mode),
+                    stacklevel=2,
+                )
+        return db
 
     def __repr__(self):
         return (
